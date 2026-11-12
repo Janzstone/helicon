@@ -1,0 +1,37 @@
+name: Windows preview build
+
+# Builds an unsigned Windows installer from a branch, so a fix can be tried before it is released.
+# The installer is a downloadable artifact on the workflow run; nothing is released or published.
+on:
+  push:
+    branches: ["claude/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-preview-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run build --workspace @helicon/daemon --workspace @helicon/ui --workspace @helicon/server
+      - name: Build installer
+        shell: bash
+        env:
+          HELICON_NODE_TARGET: x86_64-pc-windows-msvc
+        # No updater artifacts: those need the release signing key, which a preview does not use.
+        run: npm run tauri --workspace helicon-desktop -- build --target x86_64-pc-windows-msvc --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helicon-windows-installer
+          path: apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
