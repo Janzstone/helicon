@@ -2,6 +2,9 @@
 // Nothing is lost, the server's output goes to server.log.
 #![windows_subsystem = "windows"]
 
+#[cfg(windows)]
+mod redraw;
+
 use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader};
@@ -591,6 +594,9 @@ fn main() {
                     .initialization_script(OVERLAY_SCRIPT);
             }
             let window = builder.build()?;
+            // WebView2 can stop drawing when a monitor comes online or the resolution or scale changes.
+            #[cfg(windows)]
+            redraw::keep_drawing(&window);
             std::thread::spawn(move || {
                 let target = match booted_rx.recv().unwrap_or(Err(BootError::ServerFailed)) {
                     Ok(url) => url,
