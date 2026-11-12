@@ -596,7 +596,7 @@ fn main() {
             let window = builder.build()?;
             // WebView2 can stop drawing when a monitor comes online or the resolution or scale changes.
             #[cfg(windows)]
-            redraw::keep_drawing(&window);
+            redraw::keep_drawing(&window, CUSTOM_FRAME);
             std::thread::spawn(move || {
                 let target = match booted_rx.recv().unwrap_or(Err(BootError::ServerFailed)) {
                     Ok(url) => url,
