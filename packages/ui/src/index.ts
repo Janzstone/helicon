@@ -7,6 +7,6 @@ export { listedPrice, type TokenPrice } from "./model/pricing.js";
 export * from "./model/store.js";
 export { HeliconController, browserPlatform, hashToRoute, routeToHash, type Platform } from "./model/controller.js";
 export { HeliconApp, type HeliconAppProps } from "./app/HeliconApp.js";
-export type { WindowFrame } from "./app/frame.js";
+export type { CaptionHitAreas, CaptionRect, CaptionState, WindowFrame } from "./app/frame.js";
 export * from "./model/updates.js";
 export * from "./model/notify.js";
