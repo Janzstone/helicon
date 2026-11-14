@@ -10,7 +10,9 @@
 //! paint, so the UI's buttons show through, and they answer the hit test as the matching caption
 //! button. Clicks are handled here, natively, which also keeps the window closable while the page
 //! is busy or frozen. Hover and press can no longer reach the page, so they go back to it as an
-//! event and the UI draws them from that.
+//! event and the UI draws them from that. The page's own `title` tooltips cannot show either, so
+//! minimize and close get native tooltips like a standard Windows title bar; maximize has the Snap
+//! Layouts flyout instead, as it does natively.
 //!
 //! The page reports where its buttons are with the `helicon://caption-layout` event, in physical
 //! pixels measured from the client area's top-right corner; the windows are moved on every resize.
@@ -19,16 +21,22 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use windows::core::w;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, NULL_BRUSH};
+use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::{
+    InitCommonControlsEx, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX, TOOLTIPS_CLASSW, TTF_IDISHWND, TTM_ADDTOOLW,
+    TTM_POP, TTM_RELAYEVENT, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, GetClientRect, GetWindowLongPtrW, IsZoomed, LoadCursorW, PostMessageW,
+    CreateWindowExW, DefWindowProcW, GetClientRect, GetCursorPos, GetMessageTime, SendMessageW, CW_USEDEFAULT, MSG,
+    WM_MOUSEMOVE, WS_POPUP, GetWindowLongPtrW, IsZoomed, LoadCursorW, PostMessageW,
     RegisterClassW, SetWindowPos, ShowWindow, GWLP_ID, HMENU, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HWND_TOP,
     IDC_ARROW, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WINDOW_EX_STYLE,
     WM_CLOSE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
-    WM_NCMOUSEMOVE, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS,
+    WM_NCMOUSEMOVE, WINDOW_STYLE, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS,
 };
 
 /// The event the page sends with its buttons' rectangles, or with none when it stops drawing them.
@@ -67,6 +75,8 @@ struct Caption {
     /// Window handles as integers: an `HWND` is not `Send`.
     parent: isize,
     buttons: Option<[isize; 3]>,
+    /// The native tooltip for minimize and close, once the hit areas exist.
+    tooltip: Option<isize>,
     layout: Vec<ButtonRect>,
     hovered: Option<usize>,
     pressed: Option<usize>,
@@ -85,6 +95,7 @@ pub fn install(parent: HWND, notify: impl Fn(CaptionState) + Send + Sync + 'stat
         *caption = Some(Caption {
             parent: parent.0 as isize,
             buttons: None,
+            tooltip: None,
             layout: Vec::new(),
             hovered: None,
             pressed: None,
@@ -101,6 +112,9 @@ pub fn set_layout(layout: Layout) {
     caption.layout = if valid { layout.buttons } else { Vec::new() };
     if !caption.layout.is_empty() && caption.buttons.is_none() {
         caption.buttons = create_buttons(hwnd(caption.parent));
+        if let Some(buttons) = caption.buttons {
+            caption.tooltip = create_tooltip(hwnd(caption.parent), buttons);
+        }
     }
     place(caption);
 }
@@ -183,6 +197,90 @@ fn create_buttons(parent: HWND) -> Option<[isize; 3]> {
     }
 }
 
+/// What a native title bar's tooltip says for each button. Maximize shows Snap Layouts instead.
+fn tooltip_text(id: usize) -> Option<&'static str> {
+    match id {
+        0 => Some("Minimize"),
+        2 => Some("Close"),
+        _ => None,
+    }
+}
+
+/// One tooltip window, with a tool for each hit area that has tooltip text.
+fn create_tooltip(parent: HWND, buttons: [isize; 3]) -> Option<isize> {
+    unsafe {
+        let init = INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_WIN95_CLASSES,
+        };
+        let _ = InitCommonControlsEx(&init);
+        let instance = GetModuleHandleW(None).ok()?;
+        // TTS_ALWAYSTIP: native caption tooltips show on an inactive window too.
+        let tooltip = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            TOOLTIPS_CLASSW,
+            None,
+            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX),
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            Some(parent),
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .ok()?;
+        for (id, button) in buttons.iter().enumerate() {
+            let Some(text) = tooltip_text(id) else { continue };
+            // The tooltip copies the text when the tool is added, so this buffer only has to outlive the call.
+            let mut wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+            let tool = TTTOOLINFOW {
+                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+                uFlags: TTF_IDISHWND,
+                hwnd: parent,
+                uId: *button as usize,
+                lpszText: windows::core::PWSTR(wide.as_mut_ptr()),
+                ..Default::default()
+            };
+            SendMessageW(tooltip, TTM_ADDTOOLW, Some(WPARAM(0)), Some(LPARAM(&tool as *const _ as isize)));
+        }
+        Some(tooltip.0 as isize)
+    }
+}
+
+fn tooltip_of() -> Option<HWND> {
+    CAPTION.lock().ok()?.as_ref()?.tooltip.map(hwnd)
+}
+
+/// The hit areas get only non-client mouse messages, which a tooltip does not watch on its own, so
+/// each move is passed on as the client mouse move it expects.
+unsafe fn relay_to_tooltip(window: HWND) {
+    let Some(tooltip) = tooltip_of() else { return };
+    let mut screen = POINT::default();
+    if GetCursorPos(&mut screen).is_err() {
+        return;
+    }
+    let mut client = screen;
+    let _ = ScreenToClient(window, &mut client);
+    let message = MSG {
+        hwnd: window,
+        message: WM_MOUSEMOVE,
+        wParam: WPARAM(0),
+        lParam: LPARAM(((client.y as u16 as isize) << 16) | client.x as u16 as isize),
+        time: GetMessageTime() as u32,
+        pt: screen,
+    };
+    SendMessageW(tooltip, TTM_RELAYEVENT, Some(WPARAM(0)), Some(LPARAM(&message as *const _ as isize)));
+}
+
+/// Hides the tooltip, as a native caption button does when it is pressed or left.
+unsafe fn pop_tooltip() {
+    if let Some(tooltip) = tooltip_of() {
+        SendMessageW(tooltip, TTM_POP, None, None);
+    }
+}
+
 /// The caption hit-test code each hit area answers with.
 fn hit_code(id: usize) -> u32 {
     match id {
@@ -248,10 +346,12 @@ unsafe extern "system" fn button_proc(window: HWND, message: u32, wparam: WPARAM
                 dwHoverTime: 0,
             };
             let _ = TrackMouseEvent(&mut track);
+            relay_to_tooltip(window);
             update(|caption| caption.hovered = Some(id));
             LRESULT(0)
         }
         WM_NCMOUSELEAVE => {
+            pop_tooltip();
             update(|caption| {
                 if caption.hovered == Some(id) {
                     caption.hovered = None;
@@ -262,6 +362,7 @@ unsafe extern "system" fn button_proc(window: HWND, message: u32, wparam: WPARAM
         }
         // Handled here rather than by DefWindowProc, which would run its own caption-button tracking.
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK => {
+            pop_tooltip();
             update(|caption| caption.pressed = Some(id));
             LRESULT(0)
         }
