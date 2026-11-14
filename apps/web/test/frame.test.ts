@@ -192,3 +192,49 @@ describe("desktop window frame", () => {
     );
   });
 });
+
+describe("caption hit areas", () => {
+  const restores: (() => void)[] = [];
+  afterEach(() => {
+    while (restores.length) restores.pop()?.();
+  });
+
+  it("sends the buttons' layout to the shell, and an empty one to take the hit areas away", async () => {
+    const tauri = tauriWindow(() => undefined);
+    tauri.window.__HELICON_FRAME__ = "custom";
+    restores.push(stubGlobal("window", tauri.window));
+    const hitAreas = desktopFrame()?.captionHitAreas;
+    assert.ok(hitAreas);
+    const rect = { right: 69, top: 0, width: 69, height: 72 };
+    hitAreas.place([rect, rect, rect]);
+    hitAreas.place(null);
+    await tick();
+    const emits = tauri.calls.filter((call) => call.cmd === "plugin:event|emit").map((call) => call.args);
+    assert.deepEqual(emits, [
+      { event: "helicon://caption-layout", payload: { buttons: [rect, rect, rect] } },
+      { event: "helicon://caption-layout", payload: { buttons: [] } },
+    ]);
+  });
+
+  it("relays hover and press from the shell until the returned cleanup stops listening", async () => {
+    const tauri = tauriWindow((cmd) => (cmd === "plugin:event|listen" ? 4 : undefined));
+    tauri.window.__HELICON_FRAME__ = "custom";
+    restores.push(stubGlobal("window", tauri.window));
+    const hitAreas = desktopFrame()?.captionHitAreas;
+    assert.ok(hitAreas);
+    const states: unknown[] = [];
+    const stop = hitAreas.onState((state) => states.push(state));
+    await tick();
+    const listen = tauri.calls.find((call) => call.cmd === "plugin:event|listen");
+    assert.equal(listen?.args.event, "helicon://caption-state");
+    tauri.fire(listen?.args.handler, { event: "helicon://caption-state", id: 1, payload: { hovered: "maximize", pressed: null } });
+    assert.deepEqual(states, [{ hovered: "maximize", pressed: null }]);
+
+    stop();
+    await tick();
+    assert.deepEqual(
+      tauri.calls.filter((call) => call.cmd === "plugin:event|unlisten").map((call) => call.args),
+      [{ event: "helicon://caption-state", eventId: 4 }],
+    );
+  });
+});

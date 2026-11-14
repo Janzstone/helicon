@@ -1,7 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { WindowFrame } from "@helicon/ui";
+import type { CaptionHitAreas, CaptionState, WindowFrame } from "@helicon/ui";
 
 declare global {
   interface Window {
@@ -45,6 +45,30 @@ export function bindDesktopZoom(): void {
   }).catch((error: unknown) => console.error("Helicon: menu listen failed", error));
 }
 
+/**
+ * The Windows shell's native hit areas over the caption buttons: the page says where its buttons are,
+ * and the shell says which one the pointer is over, since the page no longer sees it there.
+ */
+function captionHitAreas(): CaptionHitAreas {
+  return {
+    place: (rects) => {
+      emit("helicon://caption-layout", { buttons: rects ?? [] }).catch((error: unknown) =>
+        console.error("Helicon: caption layout failed", error),
+      );
+    },
+    onState: (callback) => {
+      const pending = listen<CaptionState>("helicon://caption-state", (event) => callback(event.payload));
+      pending.catch((error: unknown) => console.error("Helicon: caption state listener failed", error));
+      return () => {
+        pending.then(
+          (unlisten) => unlisten(),
+          () => undefined,
+        );
+      };
+    },
+  };
+}
+
 /** Window controls for the desktop shell's frameless window; undefined in a browser. */
 export function desktopFrame(): WindowFrame | undefined {
   if (window.__HELICON_FRAME__ !== "custom") {
@@ -70,5 +94,6 @@ export function desktopFrame(): WindowFrame | undefined {
         );
       };
     },
+    captionHitAreas: captionHitAreas(),
   };
 }
