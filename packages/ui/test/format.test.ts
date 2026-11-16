@@ -311,6 +311,15 @@ describe("approvals and models", () => {
     assert.equal(describeApproval({ ...base, subject: { kind: "somethingNew", target: "x" } }).title, "Allow something new");
   });
 
+  it("describes a Computer Use takeover with the holder's label quoted", () => {
+    const base = { approvalId: "a", sessionId: "s", availableChoices: [], currentRequirementId: null };
+    const holder = { sessionLabel: 'Fix "login"', acquiredAt: "2026-11-14T10:00:00Z", lastActivityAt: "2026-11-14T10:05:00Z" };
+    const described = describeApproval({ ...base, subject: { kind: "computerUseTakeover", holder } });
+    assert.equal(described.title, "Take over Computer Use");
+    assert.equal(described.detail, `Another session is using it now: "Fix 'login'"`);
+    assert.equal(describeApproval({ ...base, subject: { kind: "computerUseTakeover" } }).detail, "Another session is using it now");
+  });
+
   it("takes the last non-blank line without reading the whole log", () => {
     assert.equal(lastLine(undefined), null);
     assert.equal(lastLine(""), null);

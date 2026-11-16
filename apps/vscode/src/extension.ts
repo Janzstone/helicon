@@ -478,6 +478,24 @@ function onFrameMessage(message: unknown, webview?: vscode.Webview): void {
     void vscode.commands.executeCommand("vscode.openFolder");
   } else if (data.command === "openFile") {
     void openFileInEditor(data.args);
+  } else if (data.command === "openExternal") {
+    openLink((data.args as { url?: unknown } | undefined)?.url);
+  }
+}
+
+/** Opens a web or mail link from a reply in the user's browser or mail app. Other schemes are ignored. */
+function openLink(url: unknown): void {
+  if (typeof url !== "string") {
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
+  if (parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:") {
+    vscode.env.openExternal(vscode.Uri.parse(parsed.href)).then(undefined, () => undefined);
   }
 }
 

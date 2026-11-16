@@ -88,8 +88,51 @@ export interface ThreadMeta {
   goalPauses: { from: number; to: number | null }[];
 }
 
+
+const ITEM_SHARDS = 256;
+
+function shardOf(id: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < id.length; i += 1) {
+    hash = Math.imul(hash ^ id.charCodeAt(i), 16777619);
+  }
+  return (hash >>> 0) % ITEM_SHARDS;
+}
+
+type ItemShard = ReadonlyMap<string, MspItem>;
+
+/**
+ * A thread's items, keyed by id. Immutable: a write makes a new store that shares every shard it did not touch.
+ * A plain object would be copied whole for every batch, and spreading an object of thousands of keys is slow enough
+ * that a long thread's live stream outran it and the view froze (#32).
+ */
+export class ItemStore {
+  static readonly empty = new ItemStore(new Array<ItemShard | undefined>(ITEM_SHARDS).fill(undefined), 0);
+
+  constructor(
+    readonly shards: readonly (ItemShard | undefined)[],
+    readonly size: number,
+  ) {}
+
+  get(id: string): MspItem | undefined {
+    return this.shards[shardOf(id)]?.get(id);
+  }
+
+  values(): MspItem[] {
+    const all: MspItem[] = [];
+    for (const shard of this.shards) {
+      if (shard) {
+        for (const item of shard.values()) {
+          all.push(item);
+        }
+      }
+    }
+    return all;
+  }
+}
+
 export interface ThreadFold {
-  items: Record<string, MspItem>;
+  items: ItemStore;
   /** Item ids in first-opened order. */
   order: string[];
   turns: Record<string, TurnInfo>;
@@ -109,14 +152,23 @@ export interface ThreadFold {
 }
 
 // Kinds added in Muse 1.4.11 and 1.4.12 are hidden until the UI has a design for them. Shown as generic rows, a trailing one would move a turn's final reply into the work log.
-export const HIDDEN_KINDS: ReadonlySet<string> = new Set(["reminderChild", "damagedRange", "scheduledFire", "overdueNotice"]);
+// Muse 1.4.20 adds `subagentInput`, `subagentResult` and `bodyCompletion`. They echo what the subagent and background-command rows already show.
+export const HIDDEN_KINDS: ReadonlySet<string> = new Set([
+  "reminderChild",
+  "damagedRange",
+  "scheduledFire",
+  "overdueNotice",
+  "subagentInput",
+  "subagentResult",
+  "bodyCompletion",
+]);
 
 /** Kinds that report on earlier work and can land after a turn's reply. They don't stop that reply being the turn's final one. */
-export const NOTICE_KINDS: ReadonlySet<string> = new Set(["backgroundTerminalCompletion"]);
+export const NOTICE_KINDS: ReadonlySet<string> = new Set(["backgroundTerminalCompletion", "peerMessage", "systemNotice"]);
 
 export function emptyFold(): ThreadFold {
   return {
-    items: {},
+    items: ItemStore.empty,
     order: [],
     turns: {},
     activeTurnId: null,
@@ -215,7 +267,6 @@ function isApprovalMode(value: unknown): value is ApprovalMode {
 /** Mutable working copy used inside one batch; collections are copied once, on first write. */
 /** Which of the fold's maps a batch of events can write to, so the rest are shared rather than copied. */
 interface Touched {
-  items: boolean;
   turns: boolean;
   approvals: boolean;
   userInputs: boolean;
@@ -223,17 +274,14 @@ interface Touched {
 
 /** What each event method writes to. An unknown method copies nothing, because it changes nothing here either. */
 function touchedBy(events: readonly ViewEvent[]): Touched {
-  const touches: Touched = { items: false, turns: false, approvals: false, userInputs: false };
+  const touches: Touched = { turns: false, approvals: false, userInputs: false };
   for (const event of events) {
     const method = event.method;
     if (method.startsWith("item/")) {
-      touches.items = true;
       // A delta's characters count towards its turn's streaming speed.
       touches.turns = true;
     } else if (method.startsWith("turn/")) {
       touches.turns = true;
-      // A retracted prompt is marked on the item as well as the turn.
-      touches.items = true;
       // A finished turn ends any auto-review hold that never got its own resolve.
       touches.approvals ||= method === "turn/completed";
     } else if (method.startsWith("approval/")) {
@@ -250,6 +298,9 @@ class Draft {
   private orderCopied = false;
   private echoesCopied = false;
   private callsCopied = false;
+  private shards: (ItemShard | undefined)[] | null = null;
+  private ownShards = new Set<number>();
+  private size = 0;
 
   /**
    * Only the maps this batch can write to are copied. A long thread holds tens of thousands of items, and copying
@@ -259,13 +310,43 @@ class Draft {
   constructor(base: ThreadFold, touches: Touched) {
     this.fold = {
       ...base,
-      ...(touches.items ? { items: { ...base.items } } : {}),
       ...(touches.turns ? { turns: { ...base.turns } } : {}),
       ...(touches.approvals ? { approvals: { ...base.approvals }, resolved: { ...base.resolved }, reviewing: { ...base.reviewing } } : {}),
       ...(touches.userInputs ? { userInputs: { ...base.userInputs }, settled: { ...base.settled } } : {}),
       // Small, and nearly every event reads or writes something in it.
       meta: { ...base.meta },
     };
+  }
+
+  getItem(id: string): MspItem | undefined {
+    return (this.shards ?? this.fold.items.shards)[shardOf(id)]?.get(id);
+  }
+
+  /** Items are stored by shard and a batch copies only the shards it writes to, however long the thread is. */
+  setItem(id: string, item: MspItem): void {
+    if (!this.shards) {
+      this.shards = [...this.fold.items.shards];
+      this.size = this.fold.items.size;
+    }
+    const index = shardOf(id);
+    let shard = this.shards[index] as Map<string, MspItem> | undefined;
+    if (!this.ownShards.has(index)) {
+      shard = new Map(shard);
+      this.shards[index] = shard;
+      this.ownShards.add(index);
+    }
+    if (!shard!.has(id)) {
+      this.size += 1;
+    }
+    shard!.set(id, item);
+  }
+
+  /** The folded result, with the items written during the batch. */
+  finish(): ThreadFold {
+    if (this.shards) {
+      this.fold.items = new ItemStore(this.shards, this.size);
+    }
+    return this.fold;
   }
 
   pushOrder(id: string): void {
@@ -308,9 +389,9 @@ function upsertItem(draft: Draft, incoming: MspItem): void {
   if (HIDDEN_KINDS.has(incoming.kind)) {
     return;
   }
-  const current = d.items[incoming.itemId];
+  const current = draft.getItem(incoming.itemId);
   if (!current) {
-    d.items[incoming.itemId] = incoming;
+    draft.setItem(incoming.itemId, incoming);
     draft.pushOrder(incoming.itemId);
     if (incoming.kind === "userMessage") {
       matchEcho(draft, incoming);
@@ -340,7 +421,7 @@ function upsertItem(draft: Draft, incoming: MspItem): void {
   if (next.turnId === undefined && current.turnId !== undefined) {
     next.turnId = current.turnId;
   }
-  d.items[incoming.itemId] = next;
+  draft.setItem(incoming.itemId, next);
   // A later revision can bring the shown text (`displayText`) the first one lacked, so match again.
   if (next.kind === "userMessage") {
     matchEcho(draft, next);
@@ -377,7 +458,7 @@ function appendDelta(draft: Draft, params: Record<string, unknown>): void {
     return;
   }
   const field = str(params["field"]) ?? "text";
-  let item = d.items[id];
+  let item = draft.getItem(id);
   if (!item) {
     item = {
       itemId: id,
@@ -409,7 +490,7 @@ function appendDelta(draft: Draft, params: Record<string, unknown>): void {
     const previous = next[field];
     next[field] = (typeof previous === "string" ? previous : "") + delta;
   }
-  d.items[id] = next;
+  draft.setItem(id, next);
 }
 
 /** A pause longer than this between text chunks means a new model call, so its speed is measured afresh. */
@@ -424,7 +505,7 @@ function trackStream(draft: Draft, params: Record<string, unknown>, at: number |
   }
   const d = draft.fold;
   const itemId = str(params["itemId"]);
-  const turnId = str(params["turnId"]) ?? (itemId ? (d.items[itemId]?.turnId ?? null) : null);
+  const turnId = str(params["turnId"]) ?? (itemId ? (draft.getItem(itemId)?.turnId ?? null) : null);
   if (!turnId) {
     return;
   }
@@ -718,7 +799,7 @@ export function applyEvents(fold: ThreadFold, events: readonly ViewEvent[]): Thr
   for (const event of folded) {
     applyOne(draft, event);
   }
-  return draft.fold;
+  return draft.finish();
 }
 
 export function applyEvent(fold: ThreadFold, event: ViewEvent): ThreadFold {
@@ -745,7 +826,7 @@ function carriedEchoes(fold: ThreadFold, echoes: readonly LocalEcho[]): LocalEch
     }
     const text = normalizeText(echo.text);
     const landed = fold.order.some((id) => {
-      const item = fold.items[id];
+      const item = fold.items.get(id);
       return item?.kind === "userMessage" && (item.turnId === turnId || item.commandId === turnId) && promptTexts(item).has(text);
     });
     if (landed) {
@@ -809,7 +890,7 @@ export function updateEcho(fold: ThreadFold, localId: string, patch: Partial<Loc
   if (patch.turnId && patch.disposition !== "queued") {
     const echo = fold.echoes[index] as LocalEcho;
     const landed = fold.order.some((id) => {
-      const item = fold.items[id];
+      const item = fold.items.get(id);
       return (
         item?.kind === "userMessage" &&
         (item.turnId === patch.turnId || item.commandId === patch.turnId) &&
@@ -857,7 +938,7 @@ export function inheritedTurns(fold: ThreadFold, since: number | null): Set<stri
     return inherited;
   }
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     const at = item?.recordedAt ? Date.parse(item.recordedAt) : Number.NaN;
     if (item?.turnId && at < since) {
       inherited.add(item.turnId);
@@ -879,7 +960,7 @@ export function buildTurns(fold: ThreadFold, inherited: ReadonlySet<string> = ne
   const byKey = new Map<string, TurnView>();
   const views: TurnView[] = [];
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (!item || HIDDEN_KINDS.has(item.kind) || (item.kind === "userMessage" && item.retracted)) {
       continue;
     }
@@ -924,6 +1005,32 @@ export function buildTurns(fold: ThreadFold, inherited: ReadonlySet<string> = ne
     }
   }
   return views.filter((view) => !isMirroredPrefix(view.info));
+}
+
+/** The thread's most recent prompt as the user wrote it, for Up in an empty composer. A prompt still sending counts. */
+export function lastPrompt(fold: ThreadFold): string | null {
+  for (let i = fold.echoes.length - 1; i >= 0; i -= 1) {
+    const text = fold.echoes[i]!.text;
+    if (text.trim()) {
+      return text;
+    }
+  }
+  const said = (item: MspItem | null | undefined) => item?.displayText ?? item?.text ?? "";
+  const turns = buildTurns(fold);
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i]!;
+    // A message steered into a running turn came after the prompt that started it.
+    for (let j = turn.entries.length - 1; j >= 0; j -= 1) {
+      const entry = turn.entries[j]!;
+      if (entry.kind === "userMessage" && said(entry).trim()) {
+        return said(entry);
+      }
+    }
+    if (said(turn.prompt).trim()) {
+      return said(turn.prompt);
+    }
+  }
+  return null;
 }
 
 /**

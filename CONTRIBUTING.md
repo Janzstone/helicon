@@ -14,10 +14,11 @@ Something you want to build that has no issue yet? Open one first (or start a [D
 
 ## Set up (about 5 minutes)
 
-You need Node 22 or newer and git. Rust and the Tauri prerequisites are only needed for the desktop shell.
+You need Node 22 or newer and git. If you use NVM, run `nvm use` from the repository root after installing and configuring NVM to activate the Node.js version specified by `.nvmrc`. Rust and the Tauri prerequisites are only needed for the desktop shell.
 
 ```bash
 git clone https://github.com/<you>/helicon && cd helicon
+nvm use
 npm install
 npm run build --workspace @helicon/daemon --workspace @helicon/ui --workspace @helicon/server
 ```

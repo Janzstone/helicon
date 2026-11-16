@@ -37,7 +37,7 @@ export function ChangedFiles(props: { sessionId: string }) {
       return [];
     }
     const inherited = inheritedTurns(fold, sideSince);
-    const items = fold.order.map((id) => fold.items[id]).filter((item) => item !== undefined);
+    const items = fold.order.map((id) => fold.items.get(id)).filter((item) => item !== undefined);
     return collectFileChanges(
       items.filter((item) => !item.turnId || !inherited.has(item.turnId)),
       canAct ? (path) => settledCount(settled, props.sessionId, path) : undefined,

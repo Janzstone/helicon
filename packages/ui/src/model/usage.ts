@@ -47,7 +47,7 @@ function inContext(fold: ThreadFold): { items: MspItem[]; summary: MspItem | nul
   let start = 0;
   let summary: MspItem | null = null;
   fold.order.forEach((id, index) => {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (item?.kind === "compaction" && item.outcome === "compacted") {
       start = index + 1;
       summary = item;
@@ -55,7 +55,7 @@ function inContext(fold: ThreadFold): { items: MspItem[]; summary: MspItem | nul
   });
   const items: MspItem[] = [];
   for (const id of fold.order.slice(start)) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (item && !HIDDEN_KINDS.has(item.kind) && !item.retracted) {
       items.push(item);
     }
@@ -366,7 +366,7 @@ export function sessionUsage(fold: ThreadFold, models: readonly ModelOption[]): 
   const subagents: SubagentUsage[] = [];
   const compactions: CompactionRecord[] = [];
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (!item) {
       continue;
     }

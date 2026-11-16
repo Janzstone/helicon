@@ -783,7 +783,10 @@ export class HeliconController {
       const load = await this.client.loadTranscript(sessionId);
       const buffered = this.loading.get(sessionId) ?? [];
       this.loading.delete(sessionId);
-      const fold = applyEvents(foldFromLoad(load, existing?.fold ?? null), buffered);
+      // Its echoes as they stand now: a send acknowledged, failed or started while history was on its way has
+      // changed them, and carrying the ones from before would show a prompt twice, with nothing left to clear it (#55).
+      const current = this.state.threads[sessionId]?.fold ?? existing?.fold ?? null;
+      const fold = applyEvents(foldFromLoad(load, current), buffered);
       this.appliedAt.set(sessionId, this.platform.now());
       // As it stands now, not as it stood before the load: word that the turn is running can
       // arrive while history is on its way, and the notice it took down stays down.

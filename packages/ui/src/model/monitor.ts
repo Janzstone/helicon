@@ -37,7 +37,7 @@ export function monitorView(item: MspItem, startedAt: number | null = null): Mon
 export function activeMonitors(fold: ThreadFold): MonitorView[] {
   const out: MonitorView[] = [];
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (isMonitor(item) && item.status === "inProgress") {
       out.push(monitorView(item, fold.turns[item.turnId ?? ""]?.startedAt ?? null));
     }

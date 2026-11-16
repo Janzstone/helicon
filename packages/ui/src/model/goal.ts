@@ -113,7 +113,7 @@ export function parseGoalRecord(output: string | undefined): GoalRecord | null {
 /** The newest goal record in the thread, with the turn whose tool call returned it. */
 export function latestGoalRecord(fold: ThreadFold): { record: GoalRecord; turnId: string | null } | null {
   for (let index = fold.order.length - 1; index >= 0; index -= 1) {
-    const item = fold.items[fold.order[index] as string];
+    const item = fold.items.get(fold.order[index] as string);
     if (item?.kind === "toolCall" && item.tool && GOAL_TOOLS.has(item.tool) && item.status === "completed") {
       const record = parseGoalRecord(item.visibleOutput);
       if (record) {
@@ -143,7 +143,7 @@ function goalTurns(fold: ThreadFold, start: number, end: number | null, setIn: s
   const paused = (at: number) => pauses.some((p) => at > p.from && at < (p.to ?? Number.POSITIVE_INFINITY));
   const inside = (at: number) => at >= start && (end === null || at <= end) && !paused(at);
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     const at = item?.recordedAt ? Date.parse(item.recordedAt) : Number.NaN;
     if (item?.turnId && !Number.isNaN(at) && inside(at)) {
       turns.add(item.turnId);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { ReplayClient, buildSteps, runDuration, type Recording } from "@/demo/replay";
+import { HeliconController, type Platform } from "@/product/model/controller";
 import paginate from "@/demo/recordings/paginate-users.json";
 import fixTest from "@/demo/recordings/fix-failing-test.json";
 import readme from "@/demo/recordings/readme-oneliner.json";
@@ -57,7 +58,7 @@ describe("ReplayClient", () => {
       } else {
         client.next();
       }
-      vi.runAllTimers();
+      vi.runOnlyPendingTimers();
     }
     expect(client.state().done).toBe(true);
     expect(approvals).toBe(3);
@@ -72,7 +73,7 @@ describe("ReplayClient", () => {
     const client = new ReplayClient(recordings.paginate);
     client.next();
     client.next();
-    vi.runAllTimers();
+    vi.runOnlyPendingTimers();
     expect(client.state().waiting).toBe(true);
     const pending = (await client.loadTranscript(client.sessionId)).pending.approvals[0];
     const reject = pending.availableChoices!.find((c) => c.decision === "abort")!;
@@ -83,6 +84,36 @@ describe("ReplayClient", () => {
     expect(client.state()).toMatchObject({ waiting: true, denied: false });
     const again = (await client.loadTranscript(client.sessionId)).pending.approvals[0];
     expect(again.approvalId).not.toBe(pending.approvalId);
+    client.dispose();
+  });
+
+  test("a visitor who pauses between steps never sees the thread reported as stopped", async () => {
+    vi.useFakeTimers();
+    const client = new ReplayClient(recordings.paginate);
+    const loadTranscript = vi.spyOn(client, "loadTranscript");
+    const platform: Platform = {
+      loadPrefs: () => null,
+      savePrefs: () => {},
+      readHash: () => `#/t/${encodeURIComponent(client.sessionId)}`,
+      writeHash: () => {},
+      onHashChange: () => () => {},
+      now: () => Date.now(),
+      schedule: (fn, ms) => setTimeout(fn, ms),
+      cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      focused: () => true,
+    };
+    const controller = new HeliconController(client, platform);
+    const stop = controller.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    client.next();
+    await vi.advanceTimersByTimeAsync(5_000);
+    const thread = () => controller.store.get().threads[client.sessionId];
+    expect(thread()?.fold.activeTurnId).not.toBeNull();
+    const loads = loadTranscript.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(thread()?.stalled).toBe(false);
+    expect(loadTranscript.mock.calls.length).toBe(loads);
+    stop();
     client.dispose();
   });
 });

@@ -36,6 +36,8 @@ import {
   EarlierHistoryRow,
   DiffChips,
   GenericRow,
+  PeerMessageRow,
+  SystemNoticeRow,
   ReasoningRow,
   ShellRow,
   SideChatRow,
@@ -404,6 +406,10 @@ function Entry(props: { item: MspItem; gate?: Gate; answers: UserInputAnswer[] |
       return <SideChatRow item={item} />;
     case "backgroundTerminalCompletion":
       return <BackgroundDoneRow item={item} />;
+    case "peerMessage":
+      return <PeerMessageRow item={item} />;
+    case "systemNotice":
+      return <SystemNoticeRow item={item} />;
     case "userMessage":
       return <SteerBubble item={item} />;
     default:

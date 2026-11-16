@@ -129,6 +129,9 @@ export function runDuration(recording: Recording): number {
   return Math.max(0, (end?.at ?? 0) - (first?.at ?? 0));
 }
 
+/** How often a turn the visitor has paused says it is still running. The app reloads a turn quiet for 90 s. */
+const STILL_RUNNING_MS = 30_000;
+
 export class ReplayClient extends DemoClient {
   readonly sessionId: string;
   readonly steps: ReplayStep[];
@@ -143,6 +146,7 @@ export class ReplayClient extends DemoClient {
   /** A rejected approval comes back under a fresh id, since the app treats a resolved id as settled. */
   private aliases = new Map<string, string>();
   private turnId: string | null = null;
+  private stillRunning: ReturnType<typeof setInterval> | null = null;
 
   constructor(readonly recording: Recording) {
     super();
@@ -179,6 +183,7 @@ export class ReplayClient extends DemoClient {
 
   override dispose() {
     super.dispose();
+    this.stopStillRunning();
     for (const t of this.pending) clearTimeout(t);
     this.pending = [];
     this.listeners.clear();
@@ -217,6 +222,23 @@ export class ReplayClient extends DemoClient {
     for (const listener of this.listeners) listener(state);
   }
 
+  /**
+   * Between steps the turn waits on the visitor, not on a lost stream. Say so the way the server does for a
+   * long command, so the app does not reload the turn and then report that the thread stopped.
+   */
+  private startStillRunning() {
+    this.stopStillRunning();
+    this.stillRunning = setInterval(() => {
+      if (!this.turnId) return;
+      for (const h of this.handlers) h({ type: "feed", sessionId: this.sessionId, activeTurnId: this.turnId, at: Date.now() });
+    }, STILL_RUNNING_MS);
+  }
+
+  private stopStillRunning() {
+    if (this.stillRunning !== null) clearInterval(this.stillRunning);
+    this.stillRunning = null;
+  }
+
   private send(event: ViewEvent) {
     const p = { ...params(event) };
     const id = p["approvalId"];
@@ -225,6 +247,7 @@ export class ReplayClient extends DemoClient {
     if (event.method === "turn/started") {
       this.turnId = String(p["turnId"]);
       this.setLive(this.sessionId, { activeTurnId: this.turnId, turnStartedAt: new Date().toISOString(), pendingApprovals: 0, pendingInputs: 0, lastTerminal: null, lastError: null });
+      this.startStillRunning();
     }
     if (event.method === "session/nameChanged" && typeof p["name"] === "string") {
       const session = this.sessions.get(this.sessionId);
@@ -239,6 +262,7 @@ export class ReplayClient extends DemoClient {
       this.setLive(this.sessionId, { activeTurnId: this.turnId, turnStartedAt: new Date().toISOString(), pendingApprovals: 1, pendingInputs: 0, lastTerminal: null, lastError: null });
     }
     if (event.method === "turn/completed") {
+      this.stopStillRunning();
       this.setLive(this.sessionId, { activeTurnId: null, turnStartedAt: null, pendingApprovals: 0, pendingInputs: 0, lastTerminal: "completed", lastError: null });
     }
   }

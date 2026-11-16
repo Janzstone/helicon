@@ -107,7 +107,7 @@ export function planView(usage: PlanUsage | null, now: number): PlanView | null 
 export function backgroundTasks(fold: ThreadFold): string[] {
   const ids: string[] = [];
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (item?.kind === "toolCall" && item.background === true && item.status === "inProgress") {
       ids.push(id);
     }

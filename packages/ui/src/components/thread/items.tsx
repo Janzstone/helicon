@@ -697,6 +697,38 @@ export function BackgroundDoneRow(props: { item: MspItem }) {
   );
 }
 
+/** A message another session sent to this one. The sender label is already worded by the host. */
+export function PeerMessageRow(props: { item: MspItem }) {
+  const message = props.item.peerMessage;
+  if (!message) {
+    return <GenericRow item={props.item} />;
+  }
+  return (
+    <Row
+      icon={<ChatCircleDotsIcon size={14} />}
+      label="Message from another session"
+      detail={message.senderLabel}
+      body={message.body ? <Markdown text={message.body} className="text-sm" /> : undefined}
+    />
+  );
+}
+
+/** Something Muse itself wants to tell the user: a hook, a scheduled prompt, a paused workflow. */
+export function SystemNoticeRow(props: { item: MspItem }) {
+  const { item } = props;
+  const severity = item.noticeSeverity;
+  const text = (item.text ?? item.fallbackText ?? "").trim();
+  return (
+    <Row
+      icon={severity === "error" || severity === "warning" ? <WarningCircleIcon size={14} /> : <WrenchIcon size={14} />}
+      label="Notice from Muse"
+      detail={text.split("\n")[0]}
+      tone={severity === "error" ? "danger" : severity === "warning" ? "warn" : "default"}
+      body={text ? <Markdown text={text} className="text-sm" /> : undefined}
+    />
+  );
+}
+
 function AskToRun(props: { sessionId: string; command: string }) {
   const controller = useController();
   const [sending, setSending] = useState(false);

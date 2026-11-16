@@ -1,7 +1,7 @@
 {
   "name": "helicon",
   "private": true,
-  "version": "0.23.1",
+  "version": "0.23.3",
   "description": "Helicon - open-source desktop + web ADE for Meta's Muse Code CLI",
   "workspaces": [
     "packages/*",

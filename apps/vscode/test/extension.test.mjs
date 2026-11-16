@@ -427,6 +427,19 @@ test("commands from the framed page: copy writes the clipboard and openFolder ru
   );
 });
 
+test("openExternal opens web and mail links from a reply, and ignores other schemes", async (t) => {
+  const h = await harness(t);
+  h.api.frameMessage({ type: "command", command: "openExternal", args: { url: "https://t.me/helicon" } });
+  h.api.frameMessage({ type: "command", command: "openExternal", args: { url: "http://example.com/a" } });
+  h.api.frameMessage({ type: "command", command: "openExternal", args: { url: "mailto:hello@helicon.sh" } });
+  h.api.frameMessage({ type: "command", command: "openExternal", args: { url: "javascript:alert(1)" } });
+  h.api.frameMessage({ type: "command", command: "openExternal", args: { url: "file:///etc/passwd" } });
+  h.api.frameMessage({ type: "command", command: "openExternal", args: { url: "not a url" } });
+  h.api.frameMessage({ type: "command", command: "openExternal", args: {} });
+  await until(() => h.fake.log.opened.length >= 3, "the links to open");
+  assert.deepEqual(h.fake.log.opened, ["https://t.me/helicon", "http://example.com/a", "mailto:hello@helicon.sh"]);
+});
+
 test("paste reads the clipboard and answers the view that asked, and does nothing without a view", async (t) => {
   const h = await harness(t);
   const view = await resolve(h);

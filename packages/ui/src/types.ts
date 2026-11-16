@@ -147,6 +147,10 @@ export interface MspItem {
   outputRef?: OutputRef;
   /** `backgroundTerminalCompletion` (Muse 1.4.12+): a command the agent sent to the background has finished. */
   backgroundTerminalCompletion?: BackgroundTerminalCompletion;
+  /** `peerMessage` (Muse 1.4.20+): a message another session sent to this one. */
+  peerMessage?: { body: string; remote: boolean; senderLabel: string; senderSessionId?: string };
+  /** `systemNotice` (Muse 1.4.20+): `info`, `warning` or `error`. Open; absent means the host named no level. */
+  noticeSeverity?: string;
   [key: string]: unknown;
 }
 
@@ -208,6 +212,8 @@ export interface ApprovalSubject {
   target?: string;
   workspaceRoot?: string;
   stages?: ApprovalStage[];
+  /** Muse 1.4.20+, `computerUseTakeover`: the session that holds the Computer Use lock now. Label and times only. */
+  holder?: { sessionLabel: string; acquiredAt: string; lastActivityAt: string };
 }
 
 export interface ApprovalRequest {

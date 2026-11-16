@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.23.3
+
+### New
+
+- **Up brings back your last prompt** ([#247](https://github.com/HarjjotSinghh/helicon/pull/247)). Press Up in an empty composer and the thread's most recent prompt fills in, ready to edit and send again, the same as in the `muse` CLI.
+
+### Fixed
+
+- **Long threads no longer freeze** ([#240](https://github.com/HarjjotSinghh/helicon/pull/240), fixes [#32](https://github.com/HarjjotSinghh/helicon/issues/32)). Helicon copied every item in a thread for each new batch of updates, so a thread with a large plan or many subagents could hang. It no longer copies the whole thread each time.
+- **A prompt no longer shows twice after a reload** ([#240](https://github.com/HarjjotSinghh/helicon/pull/240), fixes [#55](https://github.com/HarjjotSinghh/helicon/issues/55)). When a thread reloaded while a prompt was sending, the local copy stayed next to the real one.
+- **Threads started in the `muse` CLI show up in the sidebar** ([#237](https://github.com/HarjjotSinghh/helicon/pull/237), refs [#50](https://github.com/HarjjotSinghh/helicon/issues/50)). Subagent rows used up the discovery limit, so recent CLI threads never reached the sidebar. Only the threads Helicon keeps count toward the limit now.
+
+## 0.23.2
+
+### Fixed
+
+- **Web links in VS Code replies open again** ([#261](https://github.com/HarjjotSinghh/helicon/pull/261), fixes [#260](https://github.com/HarjjotSinghh/helicon/issues/260)). Clicking a link in a reply inside the VS Code extension now opens it in your browser.
+- **Muse in WSL runs in the right distro** ([#263](https://github.com/HarjjotSinghh/helicon/pull/263)). Helicon found Muse in WSL's default distro but launched it in one named Ubuntu, so a path found in one distro ran in the other and failed. Muse now runs where it was found, and `HELICON_WSL_DISTRO` pins a distro such as `Ubuntu-24.04`.
+
+### Changed
+
+- **Muse Code SDK 1.4.20** ([#264](https://github.com/HarjjotSinghh/helicon/pull/264), closes [#243](https://github.com/HarjjotSinghh/helicon/issues/243) and [#250](https://github.com/HarjjotSinghh/helicon/issues/250)), up from 1.4.14. Messages from another session and notices from Muse get their own rows, and a Computer Use takeover approval names the session that holds it.
+
 ## 0.23.1
 
 ### New

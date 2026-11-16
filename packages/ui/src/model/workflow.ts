@@ -118,7 +118,7 @@ function launchArgs(fold: ThreadFold | null, callId: string | null): string | un
     return undefined;
   }
   for (const id of fold.order) {
-    const item = fold.items[id];
+    const item = fold.items.get(id);
     if (item?.kind === "toolCall" && item.callId === callId && item.args) {
       return item.args;
     }

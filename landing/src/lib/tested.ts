@@ -5,7 +5,7 @@
  * Bump MUSE_CODE_TESTED with the @muse-code/sdk range in packages/daemon/package.json;
  * test/tested.test.ts fails when the two disagree.
  */
-export const MUSE_CODE_TESTED = { version: "1.4.14", date: "2026-10-29" } as const;
+export const MUSE_CODE_TESTED = { version: "1.4.20", date: "2026-11-14" } as const;
 
 /** Desktop builds, in the order the install section lists them. */
 export const DESKTOP_OS = ["Windows", "macOS", "Linux"] as const;

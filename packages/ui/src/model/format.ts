@@ -776,6 +776,14 @@ export function describeApproval(request: ApprovalRequest): ApprovalDescription 
         detail: request.rawArgs ?? null,
         mono: true,
       };
+    case "computerUseTakeover":
+      return {
+        title: "Take over Computer Use",
+        detail: subject.holder?.sessionLabel
+          ? `Another session is using it now: ${quoteAppText(subject.holder.sessionLabel)}`
+          : "Another session is using it now",
+        mono: false,
+      };
     default:
       return {
         title: `Allow ${humanize(subject.kind).toLowerCase()}`,

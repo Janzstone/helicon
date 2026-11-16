@@ -73,7 +73,7 @@ import {
 } from "./viewTail.js";
 import { AoniaError, createAonia, parseLoginOutput, type Aonia, type Profile } from "@harjjotsinghh/aonia";
 
-export const HELICON_VERSION = "0.23.1";
+export const HELICON_VERSION = "0.23.3";
 
 export interface HostExit {
   code: number | null;
@@ -264,7 +264,18 @@ const MAX_HISTORY_PAGES = 4;
 const HISTORY_PAGE_SIZE = 1000;
 /** Events per page when following a quiet session; one that fell far behind takes several pages. */
 const TAIL_PAGE_SIZE = 200;
-const DISCOVER_LIMIT = 200;
+/** Newest threads kept per discovery, newest first; `session/list` pages are at most 200 rows. */
+const DISCOVER_LIMIT = 500;
+const DISCOVER_PAGE_SIZE = 200;
+/** Rows read in all, subagent rows included, so a host with a huge history cannot stall a refresh. */
+const DISCOVER_SCAN_LIMIT = 3000;
+
+/** A subagent's own session belongs to the thread that spawned it, not to the list. */
+function isSubagentRow(item: unknown): boolean {
+  const record = asRecord(item);
+  const session = (record && asRecord(record["session"])) ?? record;
+  return session?.["kind"] === "subagent";
+}
 /** Echo-titled threads one discovery may hand to the titler. Each is a model call on the user's plan, so it is a
  * handful of recent threads rather than a whole history. */
 const TITLE_BACKFILL_LIMIT = 30;
@@ -834,7 +845,7 @@ export class HeliconServer {
       allowOrigins: options.allowOrigins ?? [],
       frameAncestors: options.frameAncestors ?? [],
       platform: options.platform ?? process.platform,
-      distro: options.distro,
+      distro: (options.distro ?? process.env["HELICON_WSL_DISTRO"])?.trim() || undefined,
       musePath: options.musePath,
       runtime: options.runtime ?? parseRuntimePreference(process.env["HELICON_MUSE_RUNTIME"]),
       findNativeMuse: options.findNativeMuse,
@@ -1902,6 +1913,21 @@ export class HeliconServer {
     return false;
   }
 
+  /**
+   * The WSL distro Muse runs in: the pinned one (`--distro` / `HELICON_WSL_DISTRO`), else the distro the
+   * probe found Muse in (WSL's default). Launching anywhere else would run a Muse path found in one distro
+   * inside another. Undefined off Windows, where it is unused.
+   */
+  private async wslDistro(): Promise<string | undefined> {
+    if (this.options.distro) {
+      return this.options.distro;
+    }
+    if (this.options.platform !== "win32") {
+      return undefined;
+    }
+    return (await this.environment(false)).defaultDistro ?? undefined;
+  }
+
   private async environment(refresh: boolean): Promise<EnvView> {
     if (!refresh && this.envCache && Date.now() - this.envCache.at < ENV_CACHE_MS) {
       return this.envCache.value;
@@ -1909,6 +1935,7 @@ export class HeliconServer {
     const hint = this.runtimeHint();
     const probe = await probeEnvironment(defaultExec, this.options.platform, {
       preference: hint === "native" || hint === "wsl" ? hint : this.options.runtime,
+      ...(this.options.distro ? { distro: this.options.distro } : {}),
       ...(this.options.findNativeMuse ? { findNative: this.options.findNativeMuse } : {}),
     });
     if (!hint) {
@@ -2361,7 +2388,7 @@ export class HeliconServer {
     if (root) {
       args.push("--workspace", root);
     }
-    const plan = planMuseCli({ platform: this.options.platform, distro: this.options.distro, musePath, args, runtime: await this.museRuntime() });
+    const plan = planMuseCli({ platform: this.options.platform, distro: await this.wslDistro(), musePath, args, runtime: await this.museRuntime() });
     const result = await this.options.exec(plan.command, plan.args);
     const parsed = parseSkillList(result.stdout);
     const listing: SkillListing = parsed
@@ -2403,7 +2430,7 @@ export class HeliconServer {
     const script = bundled ? 'exec cat -- "${XDG_DATA_HOME:-$HOME/.local/share}/muse/skills/bundled/$1"' : 'exec cat -- "$1"';
     const plan = planHostCommand({
       platform: this.options.platform,
-      distro: this.options.distro,
+      distro: await this.wslDistro(),
       program: "sh",
       args: ["-c", script, "sh", bundled ?? path],
     });
@@ -2722,7 +2749,7 @@ export class HeliconServer {
     }
     const plan = planHostCommand({
       platform: this.options.platform,
-      distro: this.options.distro,
+      distro: await this.wslDistro(),
       program: "sh",
       // $1 is the workspace, then the command; a login shell so the user's PATH is the one they expect.
       args: ["-c", 'cd "$1" || exit 1; shift; exec "${SHELL:-/bin/sh}" -lc "$1"', "sh", this.hostPathFor(cwd), command],
@@ -2920,16 +2947,24 @@ export class HeliconServer {
   private async discover(cwd?: string): Promise<Record<string, unknown>[]> {
     const host = await this.hostFor(cwd ?? "");
     const remote: unknown[] = [];
+    let scanned = 0;
     let cursor: string | null = null;
+    const seen = new Set<string>();
     do {
+      if (cursor !== null) {
+        seen.add(cursor);
+      }
       const page = await host.manager.listSessionsPage({
         workspaceRoot: cwd ? this.hostPathFor(cwd) : undefined,
-        limit: 100,
+        limit: DISCOVER_PAGE_SIZE,
         cursor,
       });
-      remote.push(...page.sessions);
-      cursor = page.nextCursor;
-    } while (cursor && remote.length < DISCOVER_LIMIT);
+      scanned += page.sessions.length;
+      // Subagent rows are dropped below, so they must not use up the budget meant for real threads (#50).
+      remote.push(...page.sessions.filter((item) => !isSubagentRow(item)).slice(0, DISCOVER_LIMIT - remote.length));
+      // An empty page, or a cursor already followed, would never move the scan forward.
+      cursor = page.sessions.length > 0 && page.nextCursor && !seen.has(page.nextCursor) ? page.nextCursor : null;
+    } while (cursor && remote.length < DISCOVER_LIMIT && scanned < DISCOVER_SCAN_LIMIT);
 
     const views: Record<string, unknown>[] = [];
     let backfill = 0;
@@ -3102,7 +3137,7 @@ export class HeliconServer {
     const musePath = await this.cliMusePath();
     const plan = planMuseCli({
       platform: this.options.platform,
-      distro: this.options.distro,
+      distro: await this.wslDistro(),
       musePath,
       args: [
         "exec",
@@ -3437,7 +3472,7 @@ export class HeliconServer {
     // WSL profile env passthrough is P3 (needs WSLENV); accounts on WSL are a later change.
     const plan = planServe({
       platform: "win32",
-      distro: this.options.distro ?? "Ubuntu",
+      distro: await this.wslDistro(),
       musePath,
       cwd: this.spawnCwdFor(cwd),
       sandboxDisabled,

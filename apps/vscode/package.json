@@ -2,7 +2,7 @@
   "name": "helicon",
   "displayName": "Helicon: Muse Code GUI (unofficial)",
   "description": "Muse Code in a side panel for VS Code and Cursor: threads as tabs, approvals you can read, the files each thread changed. Uses your own muse login (needs a Meta sign-in or API key for Muse Code).",
-  "version": "0.23.1",
+  "version": "0.23.3",
   "publisher": "harjjotsinghh",
   "private": true,
   "license": "MIT",

@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyFold, type ThreadFold } from "../src/model/fold.js";
+import { applyEvents, emptyFold, type ThreadFold } from "../src/model/fold.js";
 import { backgroundTasks, formatReset, planAge, planView } from "../src/model/plan.js";
-import type { MspItem } from "../src/types.js";
+import type { MspItem, ViewEvent } from "../src/types.js";
 
 const NOW = 1_800_000_000_000;
 
@@ -126,16 +126,13 @@ describe("background tasks", () => {
   it("lists only tool calls still running in the background", () => {
     const item = (itemId: string, patch: Partial<MspItem>): MspItem => ({ itemId, kind: "toolCall", status: "inProgress", revision: 1, ...patch });
     const base = emptyFold();
-    const fold: ThreadFold = {
-      ...base,
-      order: ["a", "b", "c", "d"],
-      items: {
-        a: item("a", { background: true }),
-        b: item("b", { background: false }),
-        c: item("c", { background: true, status: "completed" }),
-        d: item("d", { kind: "subagent", background: true }),
-      },
-    };
+    const events = [
+      item("a", { background: true }),
+      item("b", { background: false }),
+      item("c", { background: true, status: "completed" }),
+      item("d", { kind: "subagent", background: true }),
+    ].map((i): ViewEvent => ({ at: 1, method: "item/completed", params: { sessionId: "s1", item: i } }));
+    const fold: ThreadFold = applyEvents(base, events);
     assert.deepEqual(backgroundTasks(fold), ["a"]);
   });
 });

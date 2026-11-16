@@ -17,6 +17,7 @@ import { zoomStepFromKey, type ZoomStep } from "../model/zoom-shortcut.js";
 import { ControllerProvider, useApp, useController } from "./context.js";
 import { PanelContext, type PanelMode } from "./panel.js";
 import { installEditorClipboard, postToHost, setEditorHosted, useHostTheme } from "./host.js";
+import { catchOutsideLinks } from "./links.js";
 import { PanelShell } from "../components/panel/Panel.js";
 import { FrameProvider, FrameStrip, WindowControls, type WindowFrame } from "./frame.js";
 import { FocusKeeper, LiveAnnouncer, announce } from "./a11y.js";
@@ -68,6 +69,11 @@ export function HeliconApp(props: HeliconAppProps) {
   });
   useEffect(() => controller.start(), [controller]);
   useEffect(() => (props.editorHost ? installEditorClipboard(isMac) : undefined), [props.editorHost]);
+  // The editor's webview drops link clicks from a framed page, so outside links go through the editor instead.
+  useEffect(
+    () => (props.editorHost ? catchOutsideLinks((url) => postToHost({ type: "helicon-command", command: "openExternal", args: { url } })) : undefined),
+    [props.editorHost],
+  );
   const hostTheme = useHostTheme(props.hostTheme);
   const panel = props.panel ?? null;
   return (

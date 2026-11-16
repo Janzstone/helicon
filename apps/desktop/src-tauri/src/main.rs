@@ -2,6 +2,9 @@
 // Nothing is lost, the server's output goes to server.log.
 #![windows_subsystem = "windows"]
 
+#[cfg(windows)]
+mod caption;
+
 use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader};
@@ -11,8 +14,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use tauri::{Manager, Url, WebviewUrl, WebviewWindowBuilder};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 use tauri::Emitter;
+#[cfg(windows)]
+use tauri::Listener;
 
 struct ServerChild(Arc<Mutex<Option<Child>>>);
 
@@ -538,6 +543,26 @@ fn is_external_link(url: &Url) -> bool {
     }
 }
 
+/// Lays native hit areas over the minimize, maximize and close buttons the UI draws, so hovering
+/// maximize opens Windows 11's Snap Layouts and the buttons still work while the page is busy.
+/// The page says where its buttons are; hover and press go back to it so it can draw them.
+#[cfg(windows)]
+fn install_caption_buttons(app: &tauri::App, window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let notify = window.clone();
+    caption::install(window.hwnd()?, move |state| {
+        let _ = notify.emit(caption::STATE_EVENT, state);
+    });
+    let main = window.clone();
+    app.listen_any(caption::LAYOUT_EVENT, move |event| {
+        let Ok(layout) = serde_json::from_str::<caption::Layout>(event.payload()) else {
+            return;
+        };
+        // Child windows belong to the thread that runs the parent's message loop.
+        let _ = main.run_on_main_thread(move || caption::set_layout(layout));
+    });
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -591,12 +616,16 @@ fn main() {
                     .initialization_script(OVERLAY_SCRIPT);
             }
             let window = builder.build()?;
+            #[cfg(windows)]
+            install_caption_buttons(app, &window)?;
             std::thread::spawn(move || {
                 let target = match booted_rx.recv().unwrap_or(Err(BootError::ServerFailed)) {
                     Ok(url) => url,
                     Err(error) => {
                         // Error pages draw no window controls, so they get the native frame back.
                         if CUSTOM_FRAME {
+                            #[cfg(windows)]
+                            let _ = window.run_on_main_thread(caption::clear);
                             let _ = window.set_decorations(true);
                         }
                         error.page().to_string()
@@ -610,6 +639,11 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
+                // The caption hit areas are anchored to the right edge, which moves with every resize.
+                #[cfg(windows)]
+                if let tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } = event {
+                    caption::reposition();
+                }
                 if let tauri::WindowEvent::Destroyed = event {
                     if let Some(state) = window.app_handle().try_state::<ServerChild>() {
                         if let Ok(mut guard) = state.0.lock() {

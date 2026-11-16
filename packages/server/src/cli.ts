@@ -15,7 +15,7 @@ function usage(): string {
     "  --token <value>   require a token for non-loopback access",
     "  --allow-origin <o>  browser origin allowed to connect from another site (repeatable)",
     "  --frame-ancestor <o>  extra page origin allowed to frame the UI, beyond the editor extension (repeatable)",
-    "  --distro <name>   WSL distro for muse on Windows (default Ubuntu)",
+    "  --distro <name>   WSL distro for muse on Windows (default: HELICON_WSL_DISTRO, else WSL's default)",
     "  --runtime <mode>  Windows only: native, wsl, or auto (default; native Muse once installed)",
     "  --muse <path>     explicit muse binary path",
   ].join("\n");
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     token: flagValue(argv, "--token"),
     allowOrigins: flagValues(argv, "--allow-origin"),
     frameAncestors: flagValues(argv, "--frame-ancestor"),
-    distro: flagValue(argv, "--distro") ?? undefined,
+    distro: flagValue(argv, "--distro") ?? (process.env["HELICON_WSL_DISTRO"]?.trim() || undefined),
     runtime: parseRuntimePreference(flagValue(argv, "--runtime") ?? process.env["HELICON_MUSE_RUNTIME"]),
     musePath: flagValue(argv, "--muse") ?? undefined,
   });

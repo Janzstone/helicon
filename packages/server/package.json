@@ -1,6 +1,6 @@
 {
   "name": "@helicon/server",
-  "version": "0.23.1",
+  "version": "0.23.3",
   "description": "Helicon local server: REST + SSE bridge between the shared UI and Muse MSP hosts",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",

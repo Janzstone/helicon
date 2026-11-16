@@ -166,6 +166,25 @@ describe("environment probe", () => {
     assert.equal(probe.musePath, "/opt/homebrew/bin/muse");
   });
 
+  it("looks for Muse in a pinned distro instead of WSL's default", async () => {
+    const list = `  NAME            STATE           VERSION
+* Ubuntu          Running         2
+  Ubuntu-24.04    Running         2
+`;
+    const asked: string[] = [];
+    const exec: ExecFn = async (command, args) => {
+      if (command === "wsl" && args[0] === "-l") {
+        return { stdout: list, exitCode: 0 };
+      }
+      asked.push(args[1] as string);
+      return args[1] === "Ubuntu-24.04" ? { stdout: "/usr/local/bin/muse\n", exitCode: 0 } : { stdout: "", exitCode: 1 };
+    };
+    const probe = await probeEnvironment(exec, "win32", { preference: "wsl", distro: "ubuntu-24.04" });
+    assert.equal(probe.defaultDistro, "Ubuntu-24.04");
+    assert.equal(probe.musePath, "/usr/local/bin/muse");
+    assert.deepEqual(asked, ["Ubuntu-24.04"]);
+  });
+
   it("reports missing WSL cleanly", async () => {
     const exec: ExecFn = async () => ({ stdout: "", exitCode: 1 });
     const probe = await probeEnvironment(exec, "win32");

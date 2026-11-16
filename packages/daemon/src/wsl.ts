@@ -268,6 +268,8 @@ export async function probeEnvironment(
     findNative?: () => NativeMuse | null;
     home?: string;
     exists?: (path: string) => boolean;
+    /** The WSL distro to use (`--distro` / `HELICON_WSL_DISTRO`); WSL's own default when unset. */
+    distro?: string;
   } = {},
 ): Promise<EnvironmentProbe> {
   if (platform !== "win32") {
@@ -294,7 +296,11 @@ export async function probeEnvironment(
     return { platform, runtime: "wsl", native, wslAvailable: false, distros: [], defaultDistro: null, musePath: null };
   }
   const distros = parseWslList(listed.stdout);
-  const def = defaultDistro(distros);
+  // A pinned distro wins over WSL's default, and Muse is looked up in the same distro it later runs in.
+  const pinned = options.distro?.trim();
+  const def = pinned
+    ? (distros.find((d) => d.name.toLowerCase() === pinned.toLowerCase()) ?? { name: pinned, isDefault: false, state: "", version: 0 })
+    : defaultDistro(distros);
   const musePath = def ? await resolveMuseInDistro(exec, def.name) : null;
   return {
     platform,

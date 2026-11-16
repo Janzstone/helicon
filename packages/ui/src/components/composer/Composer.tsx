@@ -20,6 +20,7 @@ import { shallowEqual, useApp, useController } from "../../app/context.js";
 import { useImeGuard } from "../../app/ime.js";
 import { useSampled } from "../../app/sampled.js";
 import { basename, formatDuration, formatSpeed, formatTokens, modelDisplayName } from "../../model/format.js";
+import { lastPrompt } from "../../model/fold.js";
 import { isSshPath } from "../../model/paths.js";
 import { matchSlash, parseSlash, resolveSlash, slashCommands, type SlashCommand } from "../../model/slash.js";
 import type { SkillsState } from "../../model/store.js";
@@ -334,6 +335,16 @@ export function Composer(props: ComposerProps) {
         return;
       }
       void submit(resolveSteer(props.running, event.metaKey || event.ctrlKey, steerByDefault));
+    } else if (event.key === "ArrowUp" && !hasText && props.sessionId && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+      // Like the muse CLI: Up in an empty composer brings back the last prompt to edit and send again.
+      const fold = controller.store.get().threads[props.sessionId]?.fold;
+      const previous = fold ? lastPrompt(fold) : null;
+      if (previous) {
+        event.preventDefault();
+        setText(previous);
+        setCaret(previous.length);
+        requestAnimationFrame(() => ref.current?.setSelectionRange(previous.length, previous.length));
+      }
     } else if (event.key === "Escape" && props.running && !hasText && props.sessionId) {
       event.preventDefault();
       void controller.stop(props.sessionId);
